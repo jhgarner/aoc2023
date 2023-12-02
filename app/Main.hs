@@ -1,58 +1,55 @@
 module Main where
 
-import Control.Arrow
-import Data.Char
-import Data.Coerce
-import Data.Functor
-import Data.List (isPrefixOf)
-import Data.List.NonEmpty (NonEmpty, fromList, tails, toList)
-import Data.Semigroup
-import Data.Semigroup.Foldable
-import System.IO
-import Text.Read (readMaybe)
-import Witherable
-import Prelude hiding (filter)
+data Color = Red | Blue | Green
+    deriving (Show)
+
+data Pull a = Pull {redCubes :: a, blueCubes :: a, greenCubes :: a}
+    deriving (Show, Generic, Functor, Foldable, Traversable)
+    deriving (Semigroup, Monoid) via (Generically (Pull a))
+
+makePull :: (Monoid a) => Color -> a -> Pull a
+makePull Red numCubes = mempty{redCubes = numCubes}
+makePull Blue numCubes = mempty{blueCubes = numCubes}
+makePull Green numCubes = mempty{greenCubes = numCubes}
 
 main :: IO ()
 main = do
-    input <- getContents'
+    input <- nonemptyLines
     print $ partA input
     print $ partB input
 
-partA :: String -> Int
-partA = doPart partAParser
+partA :: [String] -> Int
+partA = sum . keys . filter isPossible . day2Parser
 
-partB :: String -> Int
-partB = doPart partBParser
+partB :: [String] -> Int
+partB = sum . fmap product . day2Parser
 
-doPart :: (String -> NonEmpty Int) -> String -> Int
-doPart parser = sum . fmap (handleLine . parser) . filter (not . null) . lines
+day2Parser :: [String] -> Map Int (Pull Int)
+day2Parser = foldMap' (parse parseLine)
 
-partAParser :: String -> NonEmpty Int
-partAParser = fromList . mapMaybe readCharMaybe
+parseLine :: Parser (Map Int (Pull Int))
+parseLine = do
+    gameId <- "Game" *> int <* ":"
+    groups <- parseGroups
+    let maxes = foldAs @(Pull (Max Int)) groups
+    pure [(gameId, maxes)]
 
-readCharMaybe :: (Read a) => Char -> Maybe a
-readCharMaybe = readMaybe . pure
+parseGroups :: Parser [Pull Int]
+parseGroups = parseGroup `sepBy` ";"
 
-handleLine :: NonEmpty Int -> Int
-handleLine = combineDigits . coerce . foldMap1 (First &&& Last)
+parseGroup :: Parser (Pull Int)
+parseGroup = foldTo <$> parseCubes `sepBy` ","
 
-combineDigits :: (Int, Int) -> Int
-combineDigits (oldNum, newDigit) = oldNum * 10 + newDigit
+parseCubes :: Parser (Pull (Sum Int))
+parseCubes = do
+    numCubes <- int
+    cubeColor <-
+        choice
+            [ "red" $> Red
+            , "blue" $> Blue
+            , "green" $> Green
+            ]
+    pure $ makePull cubeColor $ Sum numCubes
 
-partBParser :: String -> NonEmpty Int
-partBParser = fromList . mapMaybe parsePartOfB . toList . tails
-
-parsePartOfB :: String -> Maybe Int
-parsePartOfB [] = Nothing
-parsePartOfB part
-    | "one" `isPrefixOf` part = Just 1
-    | "two" `isPrefixOf` part = Just 2
-    | "three" `isPrefixOf` part = Just 3
-    | "four" `isPrefixOf` part = Just 4
-    | "five" `isPrefixOf` part = Just 5
-    | "six" `isPrefixOf` part = Just 6
-    | "seven" `isPrefixOf` part = Just 7
-    | "eight" `isPrefixOf` part = Just 8
-    | "nine" `isPrefixOf` part = Just 9
-    | otherwise = readCharMaybe $ head part
+isPossible :: (Ord a, Num a) => Pull a -> Bool
+isPossible Pull{..} = redCubes <= 12 && greenCubes <= 13 && blueCubes <= 14

@@ -57,27 +57,37 @@ common warnings
 
 executable aoc2023
   -- Import common warning flags.
-  import:           warnings
+  import:             warnings
 
   -- .hs or .lhs file containing the Main module.
-  main-is:          Main.hs
+  main-is:            Main.hs
 
   -- Modules included in this executable, other than Main.
-  other-modules:
+  other-modules:      Prelude
 
   -- LANGUAGE extensions used by modules in this package.
-  other-extensions:
+  default-extensions:
+    DerivingStrategies
+    DerivingVia
+    OverloadedLists
+    OverloadedStrings
+    RecordWildCards
 
   -- Other library packages from which modules are imported.
   build-depends:
-    , base           ^>=4.17.2.1
+    , base              ^>=4.17.2.1
+    , containers
+    , generic-deriving
     , lens
     , semigroupoids
-    , witherable
     , trifecta
+    , witherable
 
   -- Directories containing source files.
-  hs-source-dirs:   app
+  hs-source-dirs:     app
 
   -- Base language which the package is written in.
-  default-language: GHC2021
+  default-language:   GHC2021
+  mixins:
+    base (Prelude as BasePrelude),
+    base hiding (Prelude)
