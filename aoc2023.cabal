@@ -67,20 +67,28 @@ executable aoc2023
 
   -- LANGUAGE extensions used by modules in this package.
   default-extensions:
+    BlockArguments
     DerivingStrategies
     DerivingVia
+    DuplicateRecordFields
+    LexicalNegation
     OverloadedLists
+    OverloadedRecordDot
     OverloadedStrings
     RecordWildCards
 
   -- Other library packages from which modules are imported.
   build-depends:
     , base              ^>=4.17.2.1
+    , comonad
     , containers
     , generic-deriving
     , lens
+    , mtl
     , semigroupoids
+    , transformers
     , trifecta
+    , vector
     , witherable
 
   -- Directories containing source files.
