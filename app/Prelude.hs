@@ -17,6 +17,9 @@ import Data.Map.Strict qualified as M
 import Data.Maybe as Prelude (isJust)
 import Data.Monoid as Prelude (Sum (..))
 import Data.Semigroup as Prelude (Last (..), Max (..))
+import Data.Semigroup.Foldable as Prelude
+import Data.Set as Prelude (Set)
+import Data.Set qualified as S
 import Data.Vector as Prelude (Vector)
 import Debug.Trace as Prelude
 import GHC.Exts as Prelude hiding (toList, traceEvent)
@@ -74,6 +77,10 @@ anyChar = coerce <$> token Text.Trifecta.anyChar
 foldAs :: forall b a f. (Coercible a b, Coercible b a, Foldable f, Monoid b) => f a -> a
 foldAs = coerce @b @a . foldMap' coerce
 
+foldAs1 :: forall b a f. (Coercible a b, Coercible b a, Foldable1 f, Semigroup b) => f a -> a
+foldAs1 = coerce @b @a . foldMap1 coerce
+
+
 foldTo :: forall b a f. (Coercible a b, Foldable f, Monoid a) => f a -> b
 foldTo = coerce . fold
 
@@ -88,6 +95,15 @@ newtype OnlyOne a = Only a
 
 instance Semigroup (OnlyOne a) where
     _ <> _ = error "Attempt to merge values when only one was expected"
+
+setOf :: (Ord v) => v -> Set v
+setOf = S.singleton
+
+newtype Intersection v = Intersection (Set v)
+  deriving (Show)
+
+instance Ord v => Semigroup (Intersection v) where
+  Intersection a <> Intersection b = Intersection $ a `S.intersection` b
 
 -- This Map is the exact same as the other except I override Semigroup (and
 -- Monoid) to merge the values instead of throwing away the later one. You can
@@ -112,3 +128,9 @@ Map m !? k = m M.!? k
 
 mapWithKey :: (k -> a -> b) -> Map k a -> Map k b
 mapWithKey f (Map m) = Map $ M.mapWithKey f m
+
+delete :: Ord k => k -> Map k v -> Map k v
+delete k (Map m) = Map $ M.delete k m
+
+mapKeysMonotonic :: Ord k2 => (k1 -> k2) -> Map k1 v -> Map k2 v
+mapKeysMonotonic f (Map m) = Map $ M.mapKeysMonotonic f m
