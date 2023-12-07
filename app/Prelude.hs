@@ -71,7 +71,7 @@ int = fmap fromInteger integer
 nat :: (TokenParsing m, Num i) => m i
 nat = fmap fromInteger natural
 
-anyChar :: (TokenParsing m, Coercible Char c) => m c
+anyChar :: (Coercible Char c, TokenParsing m) => m c
 anyChar = coerce <$> token Text.Trifecta.anyChar
 
 foldAs :: forall b a f. (Coercible a b, Coercible b a, Foldable f, Monoid b) => f a -> a

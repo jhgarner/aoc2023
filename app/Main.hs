@@ -1,4 +1,7 @@
 module Main where
+import Data.List (sort)
+
+-- This code is gross but I'd rather catch back up than make it good.
 
 main :: IO ()
 main = do
@@ -6,93 +9,161 @@ main = do
     print $ partA input
     print $ partB input
 
-data Card a = Card {winningNumbers :: a, myNumbers :: a}
-    deriving (Show, Functor, Foldable, Generic)
-    deriving (Semigroup, Monoid) via Generically (Card a)
+data Problem = Problem { seeds :: [Int], mappings :: [[Mapping]]}
 
-instance Foldable1 Card where
-    foldMap1 f Card{..} = f winningNumbers <> f myNumbers
+parseIt :: String -> Problem
+parseIt = runMyParser do
+  seeds <- parseSeeds
+  mappings <- many do
+    eatMapHeader
+    sort <$> many parseRow
+  pure Problem{..}
 
-parseCards :: String -> [Card (Set Int)]
-parseCards = runMyParser $ many do
-    _ <- "Card" *> integer <* ":"
-    winningNumbers <- parseNumbers
-    "|"
-    myNumbers <- parseNumbers
-    pure Card{..}
+parseSeeds :: MyParser [Int]
+parseSeeds = "seeds:" >> many int
 
-parseNumbers :: MyParser (Set Int)
-parseNumbers = fmap fold $ many $ fmap setOf int
+eatMapHeader :: MyParser ()
+eatMapHeader = void $ manyTill (anyChar @Char) ":"
 
+data Mapping = Mapping { destinationStart :: Int, sourceStart :: Int, rangeLength :: Int }
+  deriving (Show, Ord, Eq)
+
+doMap :: Int -> Mapping -> Maybe Int
+doMap a Mapping{..}
+  | a >= sourceStart && a < sourceStart + rangeLength = Just $ a - sourceStart + destinationStart
+  | otherwise = Nothing
+
+parseRow :: MyParser Mapping
+parseRow = Mapping <$> int <*> int <*> int
+
+-- Note: Part A doesn't actually work, but it's right enough for the minimum
+-- seed. I can actually use my Part B solution to get the correct Part A
+-- numbers.
 partA :: String -> Int
-partA = sum . fmap (calculateScore . combineNumbers) . parseCards
+partA s =
+  let Problem{..} = parseIt s
+  in minimum $ fmap (mapAll mappings) seeds
 
-combineNumbers :: Card (Set Int) -> Set Int
-combineNumbers = foldAs1 @(Intersection Int)
+bumpIfNeeded :: Int -> Mapping -> Int
+bumpIfNeeded a Mapping{..}
+  | destinationStart <= a = a + rangeLength
+  | otherwise = a
 
-calculateScore :: Set Int -> Int
-calculateScore = floor @Double . (2.0 ^^) . (- 1) . length
+stepping :: Int -> Either Int Int -> Mapping -> Either Int Int
+stepping _ (Left found) _ = Left found
+stepping needle (Right dest) mapping = maybe (Right $ bumpIfNeeded dest mapping) Left $ doMap needle mapping
 
+mapAll :: [[Mapping]] -> Int -> Int
+mapAll mappings a = foldl' mapIt a mappings
+
+mapIt :: Int -> [Mapping] -> Int
+mapIt a = either id id . foldl' (stepping a) (Right a)
+
+
+
+-- The idea here is that we can flatten all of the maps into a single map. The
+-- size of the map is based on the number of elements in the submaps which is
+-- luckily pretty small. From there, we know that the solution will either be
+-- at the start of a map source range (keeping only the starts that sit within
+-- the seed range) or at the start of a seed range.
 partB :: String -> Int
-partB = getSum . processAllCards . fmap (length . combineNumbers) . parseCards
+partB s =
+  let Problem{..} = parseIt s
+      flat = composePipeline mappings
+  in minimum $ findMins (pairSeeds seeds) flat
 
--- This runs in O(n) where n is the length of the input. That's kind of neat
--- since the naive implementation I started with would have been O(n*k) where k
--- is related to the number of intersections.
-processAllCards :: [Int] -> Sum Int
-processAllCards = total . foldl' processCardStack (CardStack 0 (FutureCards mempty 1 0))
+pairSeeds :: [Int] -> [Pairing]
+pairSeeds [] = []
+pairSeeds (a:b:rest) = Pair{pStart=a, pEnd=a+b} : pairSeeds rest
+pairSeeds _ = error "Whoops!"
 
-processCardStack :: CardStack -> Int -> CardStack
-processCardStack stack intersections = pop . addItemTop intersections $ addTop stack
+findMins :: [Pairing] -> [Mapping] -> [Int]
+findMins seeds mappings = fmap ((`mapIt` mappings) . pStart) seeds ++ fmap snd (filter (inAnyPairing seeds . fst) $ fmap getMin mappings)
 
-data CardStack = CardStack {total :: Sum Int, stack :: FutureCards}
-    deriving (Show, Generic)
-    deriving (Semigroup, Monoid) via Generically CardStack
+getMin :: Mapping -> (Int, Int)
+getMin Mapping{..} = (sourceStart, destinationStart)
 
-pop :: CardStack -> CardStack
-pop cardStack@CardStack{stack} = cardStack{stack = step stack}
+sortBySource :: [Mapping] -> [Mapping]
+sortBySource = sortWith sourceStart
 
-addTop :: CardStack -> CardStack
-addTop cardStack@CardStack{total, stack = FutureCards{numActive}} = cardStack{total = numActive <> total}
+sourceEndOf :: Mapping -> Int
+sourceEndOf Mapping{..} = sourceStart + rangeLength
 
-addItemTop :: Int -> CardStack -> CardStack
-addItemTop n cardStack@CardStack{stack = FutureCards{numActive}} = cardStack <> mempty{stack = stackOf n numActive}
+destEndOf :: Mapping -> Int
+destEndOf Mapping{..} = destinationStart + rangeLength
 
--- This structure tracks everything we need in O(1) time.
--- The idea is that at each time step, one card might trigger copies for the
--- next n cards (aka next n time steps). The number of copies that exist for a
--- card is equal to the number of durations that span the card's time step. This
--- data structure implements a way to add, query, and step durations in O(1)
--- time.
-data FutureCards = FutureCards {durations :: Map Int (Sum Int), numActive :: Sum Int, currentTime :: Int}
-    deriving (Show, Generic)
+data Pairing = Pair {pStart :: Int, pEnd :: Int}
+  deriving (Show)
 
--- And this bit of complexity is the cost we pay for O(1) time
-instance Semigroup FutureCards where
-    a <> b
-        | a.currentTime < b.currentTime =
-            FutureCards
-                { durations = mapKeysMonotonic (+ (b.currentTime - a.currentTime)) a.durations <> b.durations
-                , numActive = a.numActive <> b.numActive
-                , currentTime = b.currentTime
-                }
-        | otherwise =
-            FutureCards
-                { durations = mapKeysMonotonic (+ (a.currentTime - b.currentTime)) b.durations <> a.durations
-                , numActive = a.numActive <> b.numActive
-                , currentTime = a.currentTime
-                }
+pairDist :: Pairing -> Int
+pairDist Pair{..} = pEnd - pStart
 
-instance Monoid FutureCards where
-  mempty = FutureCards mempty mempty 0
+inAnyPairing :: [Pairing] -> Int -> Bool
+inAnyPairing pairings a = any (inPairing a) pairings
 
-stackOf :: Int -> Sum Int -> FutureCards
-stackOf k v = FutureCards (mapOf k v) v 0
+inPairing :: Int -> Pairing -> Bool
+inPairing a Pair{..} = a >= pStart && a < pEnd
 
-step :: FutureCards -> FutureCards
-step FutureCards{..} =
-    FutureCards
-        { durations = delete currentTime durations
-        , numActive = maybe numActive (numActive -) $ durations !? currentTime
-        , currentTime = currentTime + 1
-        }
+saturateMappings :: [Mapping] -> [Mapping]
+saturateMappings mappings = mappings ++ pairAllEmptySpaces (getAllEmptySources mappings) (getAllEmptyTargets mappings)
+
+getAllEmpty :: (Mapping -> Int) -> Int -> [Mapping] -> [Pairing]
+getAllEmpty _ a [] = [Pair{pStart = a, pEnd = maxBound}]
+getAllEmpty getStart a (mapping@Mapping{rangeLength}:rest)
+  | a == getStart mapping = getAllEmpty getStart (getStart mapping + rangeLength) rest
+  | otherwise = Pair{pStart = a, pEnd = getStart mapping} : getAllEmpty getStart (getStart mapping + rangeLength) rest
+
+getAllEmptySources :: [Mapping] -> [Pairing]
+getAllEmptySources = getAllEmpty sourceStart 0 . sortBySource
+
+getAllEmptyTargets :: [Mapping] -> [Pairing]
+getAllEmptyTargets = getAllEmpty destinationStart 0 . sort
+
+
+pairAllEmptySpaces :: [Pairing] -> [Pairing] -> [Mapping]
+pairAllEmptySpaces [] [] = []
+pairAllEmptySpaces (src:srcs) (trgt:trgts) =
+  case pairEmptySpace src trgt of
+    (mapping, Nothing) -> mapping : pairAllEmptySpaces srcs trgts
+    (mapping, Just (Left leftOver)) -> mapping : pairAllEmptySpaces (leftOver:srcs) trgts
+    (mapping, Just (Right leftOver)) -> mapping : pairAllEmptySpaces srcs (leftOver:trgts)
+pairAllEmptySpaces _ _ = error "Impossible!"
+
+pairEmptySpace :: Pairing -> Pairing -> (Mapping, Maybe (Either Pairing Pairing))
+pairEmptySpace src trgt
+  | pairDist src == pairDist trgt = (mapping{rangeLength = pairDist src}, Nothing)
+  | pairDist src < pairDist trgt = (mapping{rangeLength = pairDist src}, Just $ Right trgt{pStart=trgt.pStart + pairDist src})
+  | pairDist src > pairDist trgt = (mapping{rangeLength = pairDist trgt}, Just $ Left src{pStart=src.pStart + pairDist trgt})
+  | otherwise = error "Not possible"
+  where
+    mapping = Mapping {sourceStart = src.pStart, destinationStart = trgt.pStart, rangeLength = error "Not filled in"}
+
+composePipeline :: [[Mapping]] -> [Mapping]
+composePipeline = foldl1 composeMappings . fmap saturateMappings
+
+composeMappings :: [Mapping] -> [Mapping] -> [Mapping]
+composeMappings g f = combineMappings (sort g) (sortBySource f)
+
+combineMappings :: [Mapping] -> [Mapping] -> [Mapping]
+combineMappings [] [] = []
+combineMappings (g:gs) (f:fs) =
+  case combine g f of
+    (mapping, Nothing) -> mapping : combineMappings gs fs
+    (mapping, Just (Left leftOver)) -> mapping : combineMappings (leftOver:gs) fs
+    (mapping, Just (Right leftOver)) -> mapping : combineMappings gs (leftOver:fs)
+combineMappings _ _ = error "Never!"
+
+combine :: Mapping -> Mapping -> (Mapping, Maybe (Either Mapping Mapping))
+combine a b
+  | destEndOf a == sourceEndOf b = (mapping, Nothing)
+  | destEndOf a < sourceEndOf b =
+      let usedBLength = b.rangeLength - remainingLength
+      in (mapping, Just $ Right cutMapping{sourceStart = destEndOf a, destinationStart = b.destinationStart + usedBLength})
+  | destEndOf a > sourceEndOf b =
+      let usedALength = a.rangeLength - remainingLength
+      in (mapping, Just $ Left cutMapping{destinationStart = sourceEndOf b, sourceStart = a.sourceStart + usedALength})
+  | otherwise = error "Impossible"
+  where
+    remainingLength = abs $ sourceEndOf b - destEndOf a
+    cutMapping = Mapping{sourceStart = undefined, destinationStart = undefined, rangeLength = remainingLength}
+    mapping = Mapping {sourceStart = a.sourceStart, destinationStart = b.destinationStart, rangeLength = min a.rangeLength b.rangeLength}
