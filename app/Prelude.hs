@@ -59,6 +59,9 @@ getLoc = Loc <$> fmap (fromIntegral . column) position <*> get
 instance (a ~ ()) => IsString (MyParser a) where
     fromString = void . symbol
 
+instance (a ~ (), m ~ MyParser) => IsString (Unspaced m a) where
+    fromString = void . symbol
+
 nonemptyLines :: IO [String]
 nonemptyLines = filter (not . null) . lines <$> getContents'
 
